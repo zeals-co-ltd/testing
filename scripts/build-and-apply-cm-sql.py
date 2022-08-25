@@ -36,7 +36,7 @@ metadata:
   name: k6-{k}
   namespace: load-test-sql
 spec:
-  parallelism: 4
+  parallelism: 1
   cleanup: "post"
   arguments: --out statsd
   script:
