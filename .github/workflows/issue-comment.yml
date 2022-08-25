@@ -1,0 +1,177 @@
+name: Load Test Workflow
+
+on:
+  issue_comment:
+    types:
+      - created
+
+jobs:
+  intimate-load-test-start:
+    if: |
+      (github.event.comment.body == 'start-test' || github.event.comment.body == 'start-sql-test')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Intimate test is starting
+        uses: actions/github-script@v6
+        if: |
+          (github.event.comment.body == 'start-test')
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '👋 Load test is starting'
+            })
+      - name: Intimate test sql is starting
+        uses: actions/github-script@v6
+        if: |
+          (github.event.comment.body == 'start-sql-test')
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '👋 Load test SQL is starting'
+            })
+
+  load-test:
+    # Needs the intimation of load-test starting and checking if comment made on issue or not.
+    needs: intimate-load-test-start
+    name: Setup and Publish the tests
+    runs-on: ubuntu-latest
+
+    # Checkout
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    # Setup gcloud CLI
+    - uses: google-github-actions/setup-gcloud@94337306dda8180d967a56932ceb4ddcf01edae7
+      name: Seting up GCloud CLI
+      with:
+        service_account_key: ${{ secrets.GKE_SA_KEY }}
+        project_id: ${{ secrets.GKE_PROJECT }}
+
+    # Don't think we need to authenticate Docker with GCloud as we're not building an image.
+    # Still let's keep it commented if needed later.
+
+    # # Configure Docker to use the gcloud command-line tool as a credential
+    # # helper for authentication
+    # - run: |-
+    #     gcloud --quiet auth configure-docker
+
+    # Get the GKE credentials so we can deploy to the cluster
+    - uses: google-github-actions/get-gke-credentials@fb08709ba27618c31c09e014e1d8364b02e5042e
+      name: Get Cluster credentials from GKE
+      with:
+        cluster_name: tokyo-region-v1
+        location: "asia-northeast1"
+        credentials: ${{ secrets.GKE_SA_KEY }}
+
+    # Use python script "scripts/build-and-apply-cm.py" to build and deploy the configMaps and the k6 resource
+    - name: Deploy/Update configMap and k6 resource
+      uses: actions/setup-python@v4
+      with:
+          python-version: "3.6"
+
+    - name: Run Python script
+      if: |
+        (github.event.comment.body == 'start-test')
+      run: python3 ./scripts/build-and-apply-cm.py
+
+    - name: Run Python sql script
+      if: |
+        (github.event.comment.body == 'start-sql-test')
+      run: python3 ./scripts/build-and-apply-cm-sql.py
+
+    - name: Get the jobs details and comment them in the same issue thread.
+      if: |
+        (github.event.comment.body == 'start-test')
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '🛎️🛎️🛎️ Test has started! Please run "kubectl get jobs -n load-test" to get the job details'
+          })
+
+    - name: Get the jobs details and comment them in the same issue thread.
+      if: |
+        (github.event.comment.body == 'start-sql-test')
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '🛎️🛎️🛎️ SQL Test has started! Please run "kubectl get jobs -n load-test-sql" to get the job details'
+          })
+
+  tear-down-test:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event.comment.body == 'done' || github.event.comment.body == 'done-sql')
+    steps:
+    # Setup gcloud CLI
+    - uses: google-github-actions/setup-gcloud@94337306dda8180d967a56932ceb4ddcf01edae7
+      name: Seting up GCloud CLI
+      with:
+        service_account_key: ${{ secrets.GKE_SA_KEY }}
+        project_id: ${{ secrets.GKE_PROJECT }}
+
+    # Get the GKE credentials
+    - uses: google-github-actions/get-gke-credentials@fb08709ba27618c31c09e014e1d8364b02e5042e
+      name: Get Cluster credentials from GKE
+      with:
+        cluster_name: tokyo-region-v1
+        location: "asia-northeast1"
+        credentials: ${{ secrets.GKE_SA_KEY }}
+
+    # Teardown and remake load-test ns
+    - name: Teardown and remake load-test ns
+      if: |
+        (github.event.comment.body == 'done')
+      run: |-
+        kubectl delete ns load-test
+        kubectl create ns load-test
+
+    # Teardown and remake load-test-sql ns
+    - name: Teardown and remake load-test-sql ns
+      if: |
+        (github.event.comment.body == 'done-sql')
+      run: |-
+        kubectl delete ns load-test-sql
+        kubectl create ns load-test-sql
+
+    # Intimate
+    - name: Intimate test is starting
+      uses: actions/github-script@v6
+      if: |
+        (github.event.comment.body == 'done')
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '👋 Understood, The load-test namespace has been cleaned up. Have a great day!'
+          })
+
+    # Intimate
+    - name: Intimate test is starting
+      uses: actions/github-script@v6
+      if: |
+        (github.event.comment.body == 'done-sql')
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '👋 Understood, The load-test-sql namespace has been cleaned up. Have a great day!'
+          })

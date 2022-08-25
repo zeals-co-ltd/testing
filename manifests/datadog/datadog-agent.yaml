@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datadog-agent-deployment
+  namespace: datadog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: datadog-agent
+  template:
+    metadata:
+      labels:
+        component: datadog-agent
+    spec:
+      containers:
+        - name: datadog-agent
+          image: datadog/agent:latest
+          ports:
+            - containerPort: 8125
+          env:
+            - name: DD_SITE
+              value: datadoghq.com
+            - name: DD_DOGSTATSD_NON_LOCAL_TRAFFIC
+              value: "1"
+            - name: DD_KUBELET_TLS_VERIFY
+              value: "false"
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: datadog-secret
+                  key: api-key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datadog-agent-service
+  namespace: datadog
+spec:
+  type: ClusterIP
+  selector:
+    component: datadog-agent
+  ports:
+    - targetPort: 8125
+      protocol: UDP
+      port: 8125
